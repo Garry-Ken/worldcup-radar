@@ -14,6 +14,7 @@ const wcApi = {
 }
 
 export default defineConfig({
+  base: './', // 相对路径，GitHub Pages 子路径可用
   plugins: [react(), wcApi],
   server: { port: 5197, host: true },
 })

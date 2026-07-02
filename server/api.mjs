@@ -1,6 +1,6 @@
 // /api 处理器：ESPN 实时数据（45s 缓存）→ 失败回退上次缓存 → 再失败回退演示模式
 import { fetchTournament } from './espn.mjs'
-import { demoMatches } from './demo.mjs'
+import { demoMatches } from '../shared/demo.mjs'
 
 const TTL = 45 * 1000
 let cache = { matches: null, ts: 0 }
