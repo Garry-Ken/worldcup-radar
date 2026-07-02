@@ -1,0 +1,23 @@
+{
+  "name": "worldcup-radar",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5197 --host",
+    "build": "vite build",
+    "preview": "vite preview --port 5197 --host",
+    "start": "node server/standalone.mjs"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.19",
+    "vite": "^8.0.12"
+  }
+}
