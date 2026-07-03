@@ -156,6 +156,65 @@ export function buildRatings(finished, mu) {
   return teams
 }
 
+// —— 体彩竞彩玩法映射（均为 90 分钟口径，与竞彩结算规则一致）——
+// 比分 31 选项 / 总进球 8 档 / 半全场 9 项 / 让球胜平负（让球线按 xG 差自动取整）
+const JC_HOME_SCORES = ['1:0', '2:0', '2:1', '3:0', '3:1', '3:2', '4:0', '4:1', '4:2', '5:0', '5:1', '5:2']
+const JC_DRAW_SCORES = ['0:0', '1:1', '2:2', '3:3']
+
+function jcPlayTypes(cells, norm, lh, la, pH, pD, pA) {
+  const P = (f) => cells.reduce((s, c) => s + (f(c) ? c.p : 0), 0) / norm
+  // 让球胜平负：line>0 主让，line<0 主受让
+  const diff = lh - la
+  const mag = Math.abs(diff)
+  const line = (mag < 1.75 ? 1 : mag < 2.75 ? 2 : 3) * (diff >= 0 ? 1 : -1)
+  const handicap = {
+    line,
+    h: P((c) => c.h - line > c.a),
+    d: P((c) => c.h - line === c.a),
+    a: P((c) => c.h - line < c.a),
+  }
+  // 比分：竞彩 31 选项（12 胜 + 胜其他 / 4 平 + 平其他 / 12 负 + 负其他）
+  const cellP = new Map()
+  for (const c of cells) cellP.set(`${c.h}:${c.a}`, (cellP.get(`${c.h}:${c.a}`) || 0) + c.p / norm)
+  const pick = (k) => cellP.get(k) || 0
+  const scores = []
+  let acc = 0
+  for (const k of JC_HOME_SCORES) { const p = pick(k); acc += p; scores.push({ key: k, p, res: 'H' }) }
+  scores.push({ key: '胜其他', p: Math.max(0, pH / norm - acc), res: 'H' })
+  acc = 0
+  for (const k of JC_DRAW_SCORES) { const p = pick(k); acc += p; scores.push({ key: k, p, res: 'D' }) }
+  scores.push({ key: '平其他', p: Math.max(0, pD / norm - acc), res: 'D' })
+  acc = 0
+  for (const k of JC_HOME_SCORES) {
+    const rk = k.split(':').reverse().join(':')
+    const p = pick(rk); acc += p; scores.push({ key: rk, p, res: 'A' })
+  }
+  scores.push({ key: '负其他', p: Math.max(0, pA / norm - acc), res: 'A' })
+  // 总进球：0-6、7+
+  const totals = Array.from({ length: 7 }, (_, k) => ({ key: String(k), p: P((c) => c.h + c.a === k) }))
+  totals.push({ key: '7+', p: Math.max(0, 1 - totals.reduce((s, t) => s + t.p, 0)) })
+  // 半全场：上半场约占全场进球 45%（泊松细分），枚举两个半场
+  const G = 6
+  const l1 = [lh * 0.45, la * 0.45], l2 = [lh * 0.55, la * 0.55]
+  const tb = [0, 1].map((s) => Array.from({ length: G + 1 }, (_, k) => pois(k, l1[s])))
+  const tb2 = [0, 1].map((s) => Array.from({ length: G + 1 }, (_, k) => pois(k, l2[s])))
+  const acc9 = {}
+  for (let h1 = 0; h1 <= G; h1++)
+    for (let a1 = 0; a1 <= G; a1++)
+      for (let h2 = 0; h2 <= G; h2++)
+        for (let a2 = 0; a2 <= G; a2++) {
+          const p = tb[0][h1] * tb[1][a1] * tb2[0][h2] * tb2[1][a2]
+          const ht = h1 > a1 ? '胜' : h1 === a1 ? '平' : '负'
+          const H = h1 + h2, A = a1 + a2
+          const ft = H > A ? '胜' : H === A ? '平' : '负'
+          acc9[ht + ft] = (acc9[ht + ft] || 0) + p
+        }
+  const s9 = Object.values(acc9).reduce((a, b) => a + b, 0)
+  const ORDER9 = ['胜胜', '胜平', '胜负', '平胜', '平平', '平负', '负胜', '负平', '负负']
+  const halfFull = ORDER9.map((k) => ({ key: `${k[0]}/${k[1]}`, p: (acc9[k] || 0) / s9 }))
+  return { handicap, scores, totals, halfFull }
+}
+
 export function predictMatch(ratings, mu, m) {
   const h = ratings.get(m.home.name)
   const w = ratings.get(m.away.name)
@@ -175,6 +234,7 @@ export function predictMatch(ratings, mu, m) {
       if (j - i >= 2) blowA += p
     }
   const norm = pH + pD + pA
+  const jc = jcPlayTypes(cells, norm, lh, la, pH, pD, pA)
   cells.sort((x, y) => y.p - x.p)
   return {
     m,
@@ -182,6 +242,7 @@ export function predictMatch(ratings, mu, m) {
     pH: pH / norm, pD: pD / norm, pA: pA / norm,
     blowH: blowH / norm, blowA: blowA / norm,
     top: cells.slice(0, 5).map((c) => ({ ...c, p: c.p / norm })),
+    jc,
   }
 }
 
