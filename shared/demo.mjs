@@ -1,6 +1,7 @@
 // 离线演示模式：ESPN 不可达时生成一届确定性的模拟世界杯（种子固定，比分可复现）
 // 注意：分组与比分均为虚构，前端会明确标注「演示数据」
 import { teamInfo } from './teams.mjs'
+import { priorStrength } from './strength.mjs'
 
 const GROUPS = {
   A: ['Mexico', 'Italy', 'South Korea', 'Cape Verde'],
@@ -15,19 +16,6 @@ const GROUPS = {
   J: ['Netherlands', 'Türkiye', 'Japan', 'Ghana'],
   K: ['Belgium', 'Ecuador', 'Saudi Arabia', 'DR Congo'],
   L: ['Switzerland', 'Paraguay', 'Ukraine', 'Norway'],
-}
-
-const STRENGTH = {
-  Spain: 2110, Argentina: 2095, France: 2075, England: 2050, Brazil: 2030,
-  Portugal: 2010, Netherlands: 1985, Germany: 1975, Italy: 1950, Belgium: 1935,
-  Croatia: 1925, Uruguay: 1915, Colombia: 1905, Morocco: 1900, Japan: 1880,
-  'United States': 1860, Norway: 1855, Switzerland: 1850, Mexico: 1845, Denmark: 1840,
-  Austria: 1832, 'Türkiye': 1828, Ukraine: 1820, Senegal: 1810, 'South Korea': 1800,
-  Ecuador: 1795, Canada: 1790, Iran: 1782, Paraguay: 1778, "Côte d'Ivoire": 1775,
-  Australia: 1768, Algeria: 1765, 'Scotland': 1758, Egypt: 1755, Tunisia: 1748,
-  Ghana: 1740, 'Saudi Arabia': 1700, 'DR Congo': 1698, 'South Africa': 1695,
-  Panama: 1688, Uzbekistan: 1685, Qatar: 1678, Jordan: 1660, Iraq: 1650,
-  'New Zealand': 1640, 'Cape Verde': 1620, 'Curaçao': 1600, Haiti: 1590,
 }
 
 const VENUES = [
@@ -59,7 +47,7 @@ function poissonSample(lambda, rnd) {
 
 function simScore(a, b, seed) {
   const rnd = mulberry32(seed)
-  const sa = STRENGTH[a] || 1700, sb = STRENGTH[b] || 1700
+  const sa = priorStrength(a), sb = priorStrength(b)
   const la = Math.min(3.4, Math.max(0.25, 1.32 * Math.pow(10, (sa - sb) / 780)))
   const lb = Math.min(3.4, Math.max(0.25, 1.32 * Math.pow(10, (sb - sa) / 780)))
   return [poissonSample(la, rnd), poissonSample(lb, rnd), rnd]

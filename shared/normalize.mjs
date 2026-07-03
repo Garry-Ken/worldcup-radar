@@ -16,7 +16,7 @@ const ROUNDS = {
   final: { key: 'final', name: '决赛', order: 6 },
 }
 
-function normTeam(competitor) {
+function normTeam(competitor, isPre) {
   const t = competitor?.team || {}
   const info = teamInfo(t.displayName || t.name)
   const score = competitor?.score
@@ -28,9 +28,10 @@ function normTeam(competitor) {
     tbd: info.tbd === true,
     abbr: t.abbreviation || '???',
     logo: t.logo || null,
-    score: score === '' || score == null ? null : Number(score),
-    pens: competitor?.shootoutScore == null ? null : Number(competitor.shootoutScore),
-    winner: competitor?.winner === true,
+    // ESPN 对临近开赛的场次会提前填 "0"，未开赛一律置空，避免渲染成假 0-0
+    score: isPre || score === '' || score == null ? null : Number(score),
+    pens: isPre || competitor?.shootoutScore == null ? null : Number(competitor.shootoutScore),
+    winner: !isPre && competitor?.winner === true,
   }
 }
 
@@ -40,6 +41,7 @@ export function normalizeEvents(events) {
     const comp = ev.competitions?.[0]
     if (!comp) continue
     const st = comp.status || {}
+    const state = st.type?.state || 'pre'
     const detail = st.type?.shortDetail || st.type?.detail || ''
     const round = ROUNDS[ev.season?.slug] || { key: 'other', name: '其他', order: 9 }
     const group = /Group ([A-L])/.exec(comp.altGameNote || '')?.[1] || null
@@ -50,7 +52,7 @@ export function normalizeEvents(events) {
       date: ev.date,
       round: { ...round, group },
       status: {
-        state: st.type?.state || 'pre', // pre | in | post
+        state, // pre | in | post
         completed: st.type?.completed === true,
         detail,
         clock: st.displayClock || '',
@@ -61,8 +63,8 @@ export function normalizeEvents(events) {
         name: comp.venue?.fullName || '',
         city: comp.venue?.address?.city || '',
       },
-      home: normTeam(homeC),
-      away: normTeam(awayC),
+      home: normTeam(homeC, state === 'pre'),
+      away: normTeam(awayC, state === 'pre'),
     })
   }
   matches.sort((a, b) => new Date(a.date) - new Date(b.date))

@@ -41,7 +41,7 @@ function Row({ p }) {
       </div>
       <ProbBar p={p} />
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-white/40">最可能比分</span>
+        <span className="text-[11px] text-white/40">比分概率</span>
         {p.top.map((c, i) => (
           <span
             key={i}
@@ -55,6 +55,16 @@ function Row({ p }) {
             <span className="opacity-60">{pct(c.p)}</span>
           </span>
         ))}
+        {(() => {
+          const blow = p.blowH >= p.blowA
+            ? { cn: p.m.home.cn, v: p.blowH }
+            : { cn: p.m.away.cn, v: p.blowA }
+          return blow.v >= 0.12 ? (
+            <span className="chip num bg-amber-400/10 text-amber-300/90 ring-1 ring-amber-400/20">
+              {blow.cn}净胜2+ {pct(blow.v)}
+            </span>
+          ) : null
+        })()}
         <span className="num ml-auto hidden text-[11px] text-white/30 sm:block">
           xG {p.lh.toFixed(2)} : {p.la.toFixed(2)}
         </span>
@@ -70,7 +80,7 @@ export default function Predict({ predictions }) {
       <SectionTitle
         icon="🎯"
         title="胜负 · 比分预测"
-        sub="泊松模型 · 基于本届攻防强度 · 娱乐参考"
+        sub="泊松模型 · 赛前实力先验 × 本届攻防校准 · 娱乐参考"
       />
       <Card className="px-4 py-2.5">
         <div className="mb-1 mt-1.5 flex items-center gap-3 text-[11px] text-white/45">

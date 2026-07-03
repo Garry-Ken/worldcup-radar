@@ -102,52 +102,100 @@ export function analyze(matches) {
   }
 }
 
-// —— 泊松比分预测：进攻/防守强度 = 相对赛会平均的比率，贝叶斯收缩（先验权重 2 场）——
+// —— 泊松比分预测（Maher 型对手强度校准 + 赛前实力先验）——
+// E[进球] = mu × att(自) × def(对手)；att/def 交替迭代拟合，
+// 每支队的数据都按「面对的对手强弱」折算，并向赛前实力先验做贝叶斯收缩。
+import { priorAtt, priorDef } from '../../shared/strength.mjs'
+
 function pois(k, l) {
   let p = Math.exp(-l)
   for (let i = 1; i <= k; i++) p *= l / i
   return p
 }
 
-export function predictUpcoming(a, maxN = 6) {
-  const { table, upcoming, tiles } = a
-  if (!tiles.played) return []
-  const mu = tiles.goals / (2 * tiles.played) // 场均每队进球
-  const idx = new Map(table.map((t) => [t.name, t]))
-  const strength = (name) => {
-    const t = idx.get(name)
-    if (!t) return null
-    return {
-      att: ((t.gf / t.p / mu) * t.p + 2) / (t.p + 2),
-      def: ((t.ga / t.p / mu) * t.p + 2) / (t.p + 2),
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+// 先验权重：相当于 K 场「面对平均对手、按赛前实力发挥」的虚拟比赛，
+// 防止 4-5 场小样本把弱旅摆大巴刷出的数据当真实力（如佛得角）
+const SHRINK_K = 2.5
+
+export function buildRatings(finished, mu) {
+  const teams = new Map()
+  const rec = (name) => {
+    if (!teams.has(name))
+      teams.set(name, { p: 0, att: priorAtt(name), def: priorDef(name), a0: priorAtt(name), d0: priorDef(name), rows: [] })
+    return teams.get(name)
+  }
+  for (const m of finished) {
+    const h = rec(m.home.name)
+    const w = rec(m.away.name)
+    h.p++; w.p++
+    h.rows.push({ gf: m.home.score, ga: m.away.score, opp: m.away.name })
+    w.rows.push({ gf: m.away.score, ga: m.home.score, opp: m.home.name })
+  }
+  for (let it = 0; it < 8; it++) {
+    for (const t of teams.values()) {
+      let expAtt = 0, expDef = 0, gf = 0, ga = 0
+      for (const r of t.rows) {
+        expAtt += teams.get(r.opp).def
+        expDef += teams.get(r.opp).att
+        gf += r.gf
+        ga += r.ga
+      }
+      t.att = (gf / mu + SHRINK_K * t.a0) / (expAtt + SHRINK_K)
+      t.def = (ga / mu + SHRINK_K * t.d0) / (expDef + SHRINK_K)
+    }
+    // 归一化：全体平均攻/防强度锚定为 1
+    const arr = [...teams.values()]
+    const mA = arr.reduce((s, t) => s + t.att, 0) / arr.length
+    const mD = arr.reduce((s, t) => s + t.def, 0) / arr.length
+    for (const t of arr) {
+      t.att /= mA
+      t.def /= mD
     }
   }
+  return teams
+}
+
+export function predictMatch(ratings, mu, m) {
+  const h = ratings.get(m.home.name)
+  const w = ratings.get(m.away.name)
+  if (!h?.p || !w?.p) return null
+  const lh = clamp(mu * h.att * w.def, 0.15, 4.5)
+  const la = clamp(mu * w.att * h.def, 0.15, 4.5)
+  let pH = 0, pD = 0, pA = 0, blowH = 0, blowA = 0
+  const cells = []
+  for (let i = 0; i <= 8; i++)
+    for (let j = 0; j <= 8; j++) {
+      const p = pois(i, lh) * pois(j, la)
+      cells.push({ h: i, a: j, p })
+      if (i > j) pH += p
+      else if (i === j) pD += p
+      else pA += p
+      if (i - j >= 2) blowH += p
+      if (j - i >= 2) blowA += p
+    }
+  const norm = pH + pD + pA
+  cells.sort((x, y) => y.p - x.p)
+  return {
+    m,
+    lh, la,
+    pH: pH / norm, pD: pD / norm, pA: pA / norm,
+    blowH: blowH / norm, blowA: blowA / norm,
+    top: cells.slice(0, 5).map((c) => ({ ...c, p: c.p / norm })),
+  }
+}
+
+export function predictUpcoming(a, maxN = 6) {
+  const { finished, upcoming, tiles } = a
+  if (!tiles.played) return []
+  const mu = tiles.goals / (2 * tiles.played) // 场均每队进球
+  const ratings = buildRatings(finished, mu)
   const out = []
   for (const m of upcoming) {
     if (m.home.tbd || m.away.tbd) continue
-    const h = strength(m.home.name)
-    const w = strength(m.away.name)
-    if (!h || !w) continue
-    const lh = Math.min(4, mu * h.att * w.def)
-    const la = Math.min(4, mu * w.att * h.def)
-    let pH = 0, pD = 0, pA = 0
-    const cells = []
-    for (let i = 0; i <= 6; i++)
-      for (let j = 0; j <= 6; j++) {
-        const p = pois(i, lh) * pois(j, la)
-        cells.push({ h: i, a: j, p })
-        if (i > j) pH += p
-        else if (i === j) pD += p
-        else pA += p
-      }
-    const norm = pH + pD + pA
-    cells.sort((x, y) => y.p - x.p)
-    out.push({
-      m,
-      pH: pH / norm, pD: pD / norm, pA: pA / norm,
-      lh, la,
-      top: cells.slice(0, 3).map((c) => ({ ...c, p: c.p / norm })),
-    })
+    const p = predictMatch(ratings, mu, m)
+    if (!p) continue
+    out.push(p)
     if (out.length >= maxN) break
   }
   return out
