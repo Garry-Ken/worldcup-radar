@@ -4,6 +4,7 @@ import { analyze, predictUpcoming } from './lib/analysis.js'
 import TopBar from './components/TopBar.jsx'
 import LiveStrip from './components/LiveStrip.jsx'
 import Predict from './components/Predict.jsx'
+import ModelRecord from './components/ModelRecord.jsx'
 import Bracket from './components/Bracket.jsx'
 import Schedule from './components/Schedule.jsx'
 import Insights from './components/Insights.jsx'
@@ -56,6 +57,7 @@ export default function App() {
           <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,5fr)_minmax(0,3fr)]">
             <div className="min-w-0 space-y-7">
               <Predict predictions={predictions} />
+              <ModelRecord matches={data.matches} />
               <Bracket matches={data.matches} />
               <Schedule matches={data.matches} />
             </div>

@@ -211,8 +211,31 @@ function jcPlayTypes(cells, norm, lh, la, pH, pD, pA) {
         }
   const s9 = Object.values(acc9).reduce((a, b) => a + b, 0)
   const ORDER9 = ['胜胜', '胜平', '胜负', '平胜', '平平', '平负', '负胜', '负平', '负负']
-  const halfFull = ORDER9.map((k) => ({ key: `${k[0]}/${k[1]}`, p: (acc9[k] || 0) / s9 }))
+  // 半场枚举是独立泊松近似，按主矩阵的全场胜/平/负边际做列校正，保证口径一致
+  const ftTarget = { 胜: pH / norm, 平: pD / norm, 负: pA / norm }
+  const ftCur = { 胜: 0, 平: 0, 负: 0 }
+  for (const k of ORDER9) ftCur[k[1]] += (acc9[k] || 0) / s9
+  const halfFull = ORDER9.map((k) => ({
+    key: `${k[0]}/${k[1]}`,
+    p: ((acc9[k] || 0) / s9) * (ftCur[k[1]] > 0 ? ftTarget[k[1]] / ftCur[k[1]] : 1),
+  }))
   return { handicap, scores, totals, halfFull }
+}
+
+// 平局校准（2026-07-04 依据 51 场滚动回测网格搜索定标：模型原版平均只给平局 17.9%，
+// 现实是 27.5%，淘汰赛 90 分钟平局率 33%）。两个机制配合：
+// - BP_SHARED：双变量泊松共享分量，双方进球正相关，抬整条对角线（含 2-2）
+// - DC_RHO：Dixon-Coles 低比分修正，抬 0-0/1-1、压 1-0/0-1
+// 数值都在文献常见范围内；淘汰赛「压差」参数在同一回测中被数据否决（未采用）
+const BP_SHARED = 0.25
+const DC_RHO = -0.11
+
+function dcTau(i, j, lh, la) {
+  if (i === 0 && j === 0) return 1 - lh * la * DC_RHO
+  if (i === 0 && j === 1) return 1 + lh * DC_RHO
+  if (i === 1 && j === 0) return 1 + la * DC_RHO
+  if (i === 1 && j === 1) return 1 - DC_RHO
+  return 1
 }
 
 export function predictMatch(ratings, mu, m) {
@@ -221,11 +244,16 @@ export function predictMatch(ratings, mu, m) {
   if (!h?.p || !w?.p) return null
   const lh = clamp(mu * h.att * w.def, 0.15, 4.5)
   const la = clamp(mu * w.att * h.def, 0.15, 4.5)
+  const l0h = Math.max(0.05, lh - BP_SHARED)
+  const l0a = Math.max(0.05, la - BP_SHARED)
   let pH = 0, pD = 0, pA = 0, blowH = 0, blowA = 0
   const cells = []
   for (let i = 0; i <= 8; i++)
     for (let j = 0; j <= 8; j++) {
-      const p = pois(i, lh) * pois(j, la)
+      let p = 0
+      for (let c = 0; c <= Math.min(i, j, 5); c++)
+        p += pois(c, BP_SHARED) * pois(i - c, l0h) * pois(j - c, l0a)
+      p = Math.max(0, p * dcTau(i, j, lh, la))
       cells.push({ h: i, a: j, p })
       if (i > j) pH += p
       else if (i === j) pD += p
@@ -260,4 +288,45 @@ export function predictUpcoming(a, maxN = 6) {
     if (out.length >= maxN) break
   }
   return out
+}
+
+// —— 模型战绩：滚动复盘，每场只用它开赛前的数据重新预测，与实际对账 ——
+// 加时/点球场次按竞彩口径记为「90分钟平局」，且不参与比分命中统计（90分钟比分不可知）
+export function modelRecord(matches, minTrain = 36) {
+  const fin = matches
+    .filter((m) => m.status.state === 'post' && m.home.score != null && m.away.score != null)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+  let n = 0, dir = 0, pSum = 0, dPred = 0, dReal = 0, top3 = 0, top5 = 0, scoreN = 0
+  const rows = []
+  for (let idx = minTrain; idx < fin.length; idx++) {
+    const m = fin[idx]
+    const train = fin.slice(0, idx)
+    const goals = train.reduce((s, x) => s + x.home.score + x.away.score, 0)
+    const mu = goals / (2 * train.length)
+    const p = predictMatch(buildRatings(train, mu), mu, m)
+    if (!p) continue
+    const actual = m.status.aet ? 'D' : m.home.winner ? 'H' : m.away.winner ? 'A' : 'D'
+    const predDir = p.pH >= p.pD && p.pH >= p.pA ? 'H' : p.pA >= p.pD ? 'A' : 'D'
+    const pActual = actual === 'H' ? p.pH : actual === 'A' ? p.pA : p.pD
+    n++
+    if (predDir === actual) dir++
+    pSum += pActual
+    dPred += p.pD
+    if (actual === 'D') dReal++
+    if (!m.status.aet) {
+      scoreN++
+      const rank = p.top.findIndex((c) => c.h === m.home.score && c.a === m.away.score)
+      if (rank > -1 && rank < 3) top3++
+      if (rank > -1 && rank < 5) top5++
+    }
+    rows.push({ m, predDir, actual, hit: predDir === actual, pActual })
+  }
+  return {
+    n, dir,
+    avgP: n ? pSum / n : 0,
+    drawPred: n ? dPred / n : 0,
+    drawReal: n ? dReal / n : 0,
+    top3, top5, scoreN,
+    rows: rows.slice(-6).reverse(),
+  }
 }
