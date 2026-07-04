@@ -32,7 +32,7 @@ function PowerTable({ table }) {
   const rows = all ? table : table.slice(0, 10)
   return (
     <section>
-      <SectionTitle icon="⚡" title="球队战力榜" sub="按场均积分" />
+      <SectionTitle icon="⚡" title="球队战力榜" sub="按场均积分 · 加时/点球计90分钟平局" />
       <Card className="px-3 py-2">
         <div className="grid grid-cols-[26px_minmax(0,1fr)_54px_44px_auto] items-center gap-2 px-1 py-1.5 text-[10px] uppercase tracking-wider text-white/30">
           <span>#</span><span>球队</span><span className="text-center">胜平负</span><span className="text-center">进·失</span><span className="text-right">近5场</span>

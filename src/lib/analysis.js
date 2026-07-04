@@ -1,6 +1,9 @@
 // 胜负与比分分析引擎：战力榜 / 比分分布 / 进球结构 / 泊松预测
 
+// 全站统一 90 分钟口径（与竞彩结算一致）：加时/点球场次计为平局，
+// 谁晋级由对阵图的高亮表达，不影响这里的胜平负统计
 function outcome(m) {
+  if (m.status.aet) return 'draw'
   if (m.home.winner) return 'home'
   if (m.away.winner) return 'away'
   return 'draw'
